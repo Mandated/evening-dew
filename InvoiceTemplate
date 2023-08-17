@@ -1,0 +1,360 @@
+function InvoiceTemplate() {
+
+  const wksGenerator = SpreadsheetApp.getActiveSpreadsheet().getSheets()[1];
+  const wksInvoice = SpreadsheetApp.openById("1pscXb8MepzADpZg7eNKKx99bxAWk4u-6cCtRiIAs-0w");
+  const wksData = SpreadsheetApp.openById("10xsAk862rEi3PLXBfV_kwedT2Kggnf88zjIvjzyc_j8").getSheets()[0]; // Permanent
+  // const wksData = SpreadsheetApp.openById("15CwQxx4RiFBjMPUEpZ6R5PXn80qB8gXGioOogbJtAdE").getSheets()[0]; // Temporary
+
+  const rngRequire = combineRange(wksGenerator, wksGenerator.getRange("T4"), 3);
+  const rngMembers = combineRange(wksGenerator, wksGenerator.getRange("A2"), 6);
+  const vMemberArr = rngMembers.getValues();
+  const vRequireArr = rngRequire.getValues();
+
+  var vMatchArr = [];
+  var vDetailsArr = [];
+  var dtStart = wksGenerator.getRange("M4").getValue();
+  var dtEnd = wksGenerator.getRange("N4").getValue();
+  var bNoMatch, sFirstA, sLastA, sCombA, sFirstB, sLastB, sCombB;
+  var x = 0;
+
+  for(let i = 0; i < vRequireArr.length; i++)
+  {
+    bNoMatch = true;
+    sFirstA = vRequireArr[i][2].slice(0, vRequireArr[i][2].indexOf(' ')).toLowerCase();
+    sLastA = vRequireArr[i][2].slice(vRequireArr[i][2].lastIndexOf(' ') + 1).toLowerCase();
+    sCombA = sFirstA + ' ' + sLastA;
+
+    for(let j = 0; j < vMemberArr.length; j++)
+    {
+      sFirstB = vMemberArr[j][0].slice(0, vMemberArr[j][0].indexOf(' ')).toLowerCase();
+      sLastB = vMemberArr[j][0].slice(vMemberArr[j][0].lastIndexOf(' ') + 1).toLowerCase();
+      sCombB = sFirstB + ' ' + sLastB;
+
+      if(sCombA === sCombB)
+      {
+        vMemberArr[j].push(vRequireArr[i][0]);
+        vMemberArr[j].push(vRequireArr[i][3]);
+        vMatchArr.push(vMemberArr[j]);
+
+        bNoMatch = false;
+      }
+    }
+
+    if(bNoMatch === true)
+    {
+      var msg = vRequireArr[i][0] + " needs an invoice, but does not match!";
+      alertMessage(msg);
+    }
+  }
+
+  for(let i = 0; i < vMatchArr.length; i++)
+  {
+    let tempArr = [];
+
+    for(let j = 0; j < vMatchArr[i].length; j++)
+    {
+      if(j < 6)
+      {
+        tempArr.push(vMatchArr[i][j])
+      }  
+
+    }
+    vDetailsArr.push(tempArr);
+  }
+
+  var sFind, sPrefix, sRestaurant, sInvoice, sFolderName, sBTW; 
+  var wksCopy, fileNew, folder, iInvoiceCount, iRepeat, bReplace, bRestaurant, vRestaurantObj;
+  var rngData = getDataRange(wksData, dtStart, dtEnd);
+  var rngReplace = wksGenerator.getParent().getRangeByName("Replace");
+  var vdDataArr = rngData.getDisplayValues();
+  var vDataArr = rngData.getValues();
+  var vReplaceArr = rngReplace.getValues();
+  var iRepeat = 0;
+
+  if (vMatchArr.length === 0)
+  {
+    return;
+  }
+
+  for(let i = 0; i < vMatchArr.length; i++)
+  {
+    iRepeat = 0;
+    var vRestaurantMap = new Map();
+
+    if(vMatchArr[i][9] === true)
+    {
+      bReplace = true;
+    }
+
+    sReplace = vMatchArr[i][0];
+    sFind = vMatchArr[i][7];
+    sBTW = vMatchArr[i][6];
+
+    for(let j = 0; j < vDataArr.length; j++)
+    {
+      sRestaurant = vDataArr[j][1];
+
+      if(sFind === vDataArr[j][19].trim())
+      {
+        if(bReplace === true)
+        {
+          for(let k = 0; k < vReplaceArr.length; k++)
+          {
+            vDataArr[j][19] = vDataArr[j][19].replace(vReplaceArr[k][0], vReplaceArr[k][1]);
+            vdDataArr[j][19] = vdDataArr[j][19].replace(vReplaceArr[k][0], vReplaceArr[k][1]);;
+          }
+        }
+
+        bRestaurant = checkMap(vRestaurantMap, sRestaurant);
+
+        if(bRestaurant === false)
+        { 
+          sInvoice =  vdDataArr[j][16].trim().toLowerCase();
+
+          if(sInvoice === 'n' || sInvoice === "")
+          {
+            sFolderName = vdDataArr[j][19].trim();
+            folder = getFolders(sFolderName);
+            iInvoiceCount = countFilesInFolder(folder) + 1;
+            iRepeat = 1;
+
+            if(iInvoiceCount <= 9)
+            {
+              sPrefix = "F000";
+            }
+            else
+            {
+              sPrefix = "F00";
+            }
+
+            fileNew = DriveApp.getFileById(wksInvoice.getId()).makeCopy(sPrefix + iInvoiceCount, folder);
+            wksCopy = SpreadsheetApp.openById(fileNew.getId());
+            vRestaurantMap.set(sRestaurant, [wksCopy, iInvoiceCount, iRepeat, fileNew]);
+            vdDataArr[j][16] = createLinks(fileNew, rngData, j);
+            setForms(vRestaurantMap.get(sRestaurant)[0], vDataArr[j], vdDataArr[j], vDetailsArr[i], sPrefix, vRestaurantMap.get(sRestaurant)[2], vRestaurantMap.get(sRestaurant)[1], true, sBTW);
+          }
+          else
+          {
+            iInvoiceCount--;
+          }
+        }
+        else
+        {
+          iRepeat++;
+          vRestaurantMap.set(sRestaurant,[vRestaurantMap.get(sRestaurant)[0], vRestaurantMap.get(sRestaurant)[1], iRepeat,  vRestaurantMap.get(sRestaurant)[3]]);
+          vdDataArr[j][16] = createLinks(vRestaurantMap.get(sRestaurant)[3], rngData, j);
+          setForms(vRestaurantMap.get(sRestaurant)[0], vDataArr[j], vdDataArr[j], vDetailsArr[i], sPrefix, vRestaurantMap.get(sRestaurant)[2], vRestaurantMap.get(sRestaurant)[1], false, sBTW);
+        }
+      }
+    }
+  }
+}
+
+function checkMap(myMap, targetValue)
+{
+  for (const [key, valueArray] of myMap) 
+  {
+    if (key === targetValue)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+function checkRestaurant(obj, targetValue) {
+  for (let key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      if (key === targetValue) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getDataRange(wksData, dtStart, dtEnd)
+{
+  var rngDate = wksData.getRange("D2:D" + wksData.getLastRow());
+  var vDateArr = rngDate.getValues();
+  var iStartRow, iEndRow, rngData;
+
+  for(let i = 0; i < vDateArr.length; i++)
+  {
+    dtCheck = vDateArr[i][0];
+
+    if(dtCheck >= dtStart && iStartRow === undefined)
+    {
+      iStartRow = i + 2; // Offset 2 rows to account for gaps & header
+    }
+    
+    if(dtCheck > dtEnd && iEndRow === undefined)
+    {
+      iEndRow = i + 1; // Actually -1 then + 2, -1 since criteria is met on first date past end date
+    }
+  }
+  
+  return rngData = wksData.getRange("B" + iStartRow + ":U" + iEndRow);
+}
+
+function createLinks(newFile, rngData, i)
+{
+  var link = newFile.getUrl();
+  var fName = newFile.getName();
+
+  var richValue = SpreadsheetApp.newRichTextValue()
+    .setText(fName)
+    .setLinkUrl(link)
+    .build();
+  rngData.getCell(i + 1, 17).setRichTextValue(richValue);
+  return fName;
+}
+
+function setForms(wksCopy, vDataArr, vdDataArr, vMatchArr, sPrefix, iRepeat, iInvoiceCount, bInvoice, sBTW)
+{
+  // Member Column Order: Name, Address, Postal Place, BTW, KvK, IBAN
+  if(bInvoice === true)
+  {
+    var rngLeft = wksCopy.getRange("B4:B9");
+    var rngRightA = wksCopy.getRange("F5");
+    var rngRightB = wksCopy.getRange("F7");
+    var rngBR = wksCopy.getRange("E13:E15");
+  
+    var dtToday = new Date();
+    var dd = String(dtToday.getDate()).padStart(2, '0');
+    var mm = String(dtToday.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = dtToday.getFullYear();
+
+    var vPrefixVal = ["", "", "", "BTW: ", "KvK: ", "IBAN: "]
+    var combVals;
+
+    for(let i = 0; i < vMatchArr.length; i++)
+    {
+      combVals = vPrefixVal[i] + vMatchArr[i];
+      rngLeft.getCell(i + 1, 1).setValue(combVals);
+    }
+    
+    rngRightA.setValue(dd + "-" + mm + "-" + yyyy);
+    rngRightB.setValue(sPrefix + iInvoiceCount);
+    rngBR.getCell(1, 1).setValue(vMatchArr[5]);
+    rngBR.getCell(2, 1).setValue("T.n.v. " + vMatchArr[0]);
+    rngBR.getCell(3, 1).setValue("O.v.v. Factuur nr. " + sPrefix + iInvoiceCount);
+  }
+  
+  var dateWorked = vdDataArr[2];
+  var startTime = vdDataArr[3];
+  var endTime = vdDataArr[4];
+  var breakTime = vdDataArr[5];
+  var workPlace = vdDataArr[1];
+  var timeWorked = vdDataArr[6];
+  
+  // Don't use display value on hourlyPay since in Euros
+  var hourlyPay = vDataArr[18];
+  var sHourly = hourlyPay + "";
+
+  if(sHourly.length === 2)
+  {
+    sHourly = sHourly + ",00";
+  }
+  else if(sHourly.length === 4)
+  {
+    sHourly = sHourly.slice(0, 2) + ",50";
+  }
+  else
+  {
+    sHourly = sHourly.slice(0, 2) + "," + sHourly.slice(3);
+  }
+
+  var hrs = timeWorked.slice(0,timeWorked.indexOf(","));
+  var breakMin = breakTime.slice(breakTime.indexOf(":") + 1);
+  var breakHr = breakTime.slice(0, 2);
+  var breakTotal = ((parseInt(breakHr) * 60) + parseInt(breakMin));
+  var mins = vdDataArr[7];
+  var multiplier = 0.21;
+
+  var rngBL = wksCopy.getRange("B" + (21 + iRepeat - 1) + ":E" + (21 + iRepeat - 1));
+
+  rngBL.getCell(1, 1).setValue(dateWorked + " van " + startTime + " tot " + endTime + 
+  " (" + breakTotal + " min pauze)\n" + workPlace + " - " + hrs + "u" + mins + "m à €" + sHourly);
+
+  if(sBTW !== "btw-id")
+  {
+    multiplier = 0;
+  }
+
+  rngBL.getCell(1, 3).setFormula("" + sHourly + "" + "*" + timeWorked);
+
+  if(multiplier === 0.21)
+  {
+    rngBL.getCell(1, 4).setFormula('=IF(D' + (21 + iRepeat - 1) + ';D' + (21 + iRepeat - 1) + '*0,21;0)');
+  }
+  else
+  {
+    rngBL.getCell(1, 4).setFormula('=IF(D' + (21 + iRepeat - 1) + ';D' + (21 + iRepeat - 1) + '*0;0)');
+  }
+
+}
+
+function countFilesInFolder(theFolder) {
+  //Define variables without assigning a value
+  var count,file,files;  
+
+  files = theFolder.getFiles();
+  count = 0;
+
+  while (files.hasNext()) {
+   file = files.next();
+   fileType = file.getMimeType();
+   if(fileType = "application/vnd.google-apps.spreadsheet")
+   {
+     count++;
+   }
+ };
+  return count;
+}
+
+function combineRange(sht, rngCombine, colOffset) 
+{
+  const startRow = rngCombine.getRow();
+  const startCol = rngCombine.getColumn();
+  const lastRow = sht.getLastRow();
+  const fullRange = sht.getRange(startRow, startCol, lastRow - startRow + 1, colOffset + 1);
+
+  const values = fullRange.getValues();
+  let lastNonEmptyRowIndex = -1;
+
+  for (let i = 0; i < values.length; i++) 
+  {
+    if (values[i][colOffset] !== "") 
+    {
+        lastNonEmptyRowIndex = i;
+    }
+  }
+
+  const resultNumRows = lastNonEmptyRowIndex + 1;
+  return sht.getRange(startRow, startCol, resultNumRows, colOffset + 1);
+}
+
+function getFolders(folderName)
+{      
+  var folders = DriveApp.getFolders();     
+ while (folders.hasNext()) {
+   var folder = folders.next();
+   if(folderName === folder.getName()) {         
+     return folder;
+   }
+ }
+  var rootFolder = DriveApp.getFolderById("1G5LJ92IL9AGtXx_liKrpSxeu15PJQ4KT");
+  var folder = rootFolder.createFolder(folderName);
+  
+  folder.setName(folderName);
+  return folder;
+}
+
+function createSpreadSheetInFolder(ss_new_name, folder_dest_id) {
+    var ss_new = SpreadsheetApp.create(ss_new_name);
+    var ss_new_id = ss_new.getId();
+    var newfile = DriveApp.getFileById(ss_new_id);
+    newfile.moveTo(DriveApp.getFolderById(folder_dest_id))
+    return ss_new_id;
+}
